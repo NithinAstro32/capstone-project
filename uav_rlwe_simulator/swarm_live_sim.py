@@ -7,7 +7,7 @@ Live swarm simulation:
 """
 
 import time
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -33,12 +33,41 @@ def build_swarm_graph(uav_ids: List[str]) -> nx.DiGraph:
     return G
 
 
-def run_batch_auth(uavs: List[UAVNode], gcs: GroundControlStation) -> Dict[str, Any]:
+def _uav_parent(graph: nx.DiGraph, uav_id: str) -> str:
+    """Return current parent GCS node for a UAV based on incoming edge."""
+    preds = list(graph.predecessors(uav_id))
+    return preds[0] if preds else "Unknown"
+
+
+def _print_session_keys(uavs: List[UAVNode], header: str, limit: int = 5) -> None:
+    """Print a short view of session keys (hex prefix) like main.py."""
+    print(header)
+    for uav in uavs[:limit]:
+        key = uav.session_key
+        hex_key = key.hex() if key else "None"
+        print(f"  {uav.id}: {hex_key[:32]}...")
+    if len(uavs) > limit:
+        print(f"  ... ({len(uavs) - limit} more UAVs)")
+    print()
+
+
+def run_batch_auth(
+    uavs: List[UAVNode],
+    gcs: GroundControlStation,
+    graph: Optional[nx.DiGraph] = None,
+    verbose_ids: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     start = time.perf_counter()
     for uav in uavs:
+        if verbose_ids is not None and uav.id in verbose_ids:
+            parent = _uav_parent(graph, uav.id) if graph is not None else gcs.id
+            print(f"{uav.id} connected to {parent}")
+            print("Running RLWE key agreement")
         ok = uav.connect_to_gcs(gcs)
         if not ok:
             print(f"Authentication failed for {uav.id}")
+        elif verbose_ids is not None and uav.id in verbose_ids:
+            print("Session key established\n")
     end = time.perf_counter()
 
     total_time_s = end - start
@@ -98,7 +127,11 @@ def main() -> None:
     fig, (ax_graph, ax_text) = plt.subplots(1, 2, figsize=(12, 6))
     ax_text.axis("off")
 
-    metrics = run_batch_auth(uavs, gcs)
+    # Round 0: initial batch auth. Print main.py-like logs for the first few UAVs.
+    print("\nRound 0: Initial batch authentication\n")
+    verbose_first = [u.id for u in uavs[:5]]
+    metrics = run_batch_auth(uavs, gcs, graph=graph, verbose_ids=verbose_first)
+    _print_session_keys(uavs, header="--- Session keys (hex) ---", limit=5)
 
     ax_graph.clear()
     draw_topology(graph, title="Swarm Topology: GCS1 & GCS2", ax=ax_graph)
@@ -123,6 +156,8 @@ def main() -> None:
         to_move = uav_ids[moved_index: moved_index + group_size]
         moved_index += group_size
 
+        print("Topology change detected")
+        print(f"Round {r}: moving {len(to_move)} UAV(s) from GCS1 to GCS2\n")
         for uid in to_move:
             if uid in graph.nodes:
                 move_uav(
@@ -133,7 +168,10 @@ def main() -> None:
                     new_parent_id="GCS2",
                 )
 
-        metrics = run_batch_auth(uavs, gcs)
+        # Re-auth after topology change. Print detailed logs only for moved UAVs.
+        print("Re-running RLWE key agreement\n")
+        metrics = run_batch_auth(uavs, gcs, graph=graph, verbose_ids=to_move)
+        _print_session_keys(uavs, header="--- Session keys after topology change (hex) ---", limit=5)
 
         ax_graph.clear()
         draw_topology(
