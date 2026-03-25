@@ -1,9 +1,17 @@
 """
-Live swarm simulation:
-  - Multiple rounds of batch RLWE authentication for a UAV swarm.
+Live swarm simulation (Concept 1: RLWE + Topology + Batch Auth):
+  - Demonstrates post-quantum RLWE key agreement in UAV swarms.
+  - Multiple rounds of batch authentication for a UAV swarm.
   - At each round, some UAVs move from GCS1's domain to GCS2's domain.
+  - Both GCS1 and GCS2 are legitimate and trusted by UAVs.
   - After each batch authentication, metrics are recomputed and shown
     live inside the figure.
+  
+  Key demonstration features:
+    * RLWE-based cryptographic handshake
+    * Dynamic topology changes (UAV handoff between GCS domains)
+    * Batch authentication performance metrics
+    * Session key establishment and management
 """
 
 import time
@@ -125,15 +133,15 @@ def main() -> None:
     print(f"RLWE parameters: n={params['n']}, q={params['q']}\n")
 
     gcs1 = GroundControlStation(gcs_id="GCS1")
-    # This can represent a legitimate neighboring GCS OR a rogue base station.
-    # By default, UAVs will NOT trust GCS2 unless explicitly provisioned.
+    # GCS2 is a legitimate secondary base station (owned by the same operator)
     gcs2 = GroundControlStation(gcs_id="GCS2")
     uavs = create_swarm(swarm_size)
     for uav in uavs:
         gcs1.register_uav(uav.id)
         gcs2.register_uav(uav.id)
-        # Trust policy: only GCS1 is trusted by default.
+        # Trust policy: both GCS1 and GCS2 are trusted (both legitimate)
         uav.trust_gcs(gcs1.id, gcs1.auth_token)
+        uav.trust_gcs(gcs2.id, gcs2.auth_token)
 
     uav_ids = [u.id for u in uavs]
     graph = build_swarm_graph(uav_ids)
