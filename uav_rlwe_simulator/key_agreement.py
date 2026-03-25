@@ -8,6 +8,8 @@ Simulates a 3-message handshake:
 """
 
 from typing import TYPE_CHECKING, Optional
+import hashlib
+import secrets
 
 from rlwe import (
     generate_parameters,
@@ -29,6 +31,17 @@ def rlwe_handshake(
     """
     Perform RLWE-based key agreement between a UAV and the GCS.
     """
+    # Step 0: GCS authorization + identity proof (toy challenge-response).
+    # If UAV does not trust this GCS, or proof fails, reject (fail-closed).
+    expected_token = getattr(uav, "trusted_gcs_tokens", {}).get(getattr(gcs, "id", ""), None)
+    if expected_token is None:
+        return b""
+    nonce = secrets.token_bytes(16)
+    proof = gcs.prove_identity(nonce)
+    expected_proof = hashlib.sha256(expected_token + nonce).digest()
+    if proof != expected_proof:
+        return b""
+
     if params is None:
         params = getattr(gcs, "_rlwe_params", None)
     if params is None:

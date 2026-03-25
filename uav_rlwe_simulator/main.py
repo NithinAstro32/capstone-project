@@ -28,6 +28,8 @@ def main() -> None:
 
     for uav in uavs:
         gcs.register_uav(uav.id)
+        # Trust the known GCS (toy token-based authorization)
+        uav.trust_gcs(gcs.id, gcs.auth_token)
 
     graph_initial = create_network(gcs_id="GCS", uav_ids=["UAV1", "UAV2", "UAV3"])
 

@@ -7,7 +7,7 @@ Live swarm simulation:
 """
 
 import time
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Mapping
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -56,6 +56,7 @@ def run_batch_auth(
     gcs: GroundControlStation,
     graph: Optional[nx.DiGraph] = None,
     verbose_ids: Optional[List[str]] = None,
+    gcs_map: Optional[Mapping[str, GroundControlStation]] = None,
 ) -> Dict[str, Any]:
     start = time.perf_counter()
     for uav in uavs:
@@ -63,9 +64,16 @@ def run_batch_auth(
             parent = _uav_parent(graph, uav.id) if graph is not None else gcs.id
             print(f"{uav.id} connected to {parent}")
             print("Running RLWE key agreement")
-        ok = uav.connect_to_gcs(gcs)
+        # Pick the GCS to authenticate against based on topology parent.
+        if gcs_map is not None and graph is not None:
+            parent = _uav_parent(graph, uav.id)
+            gcs_for_uav = gcs_map.get(parent, gcs)
+        else:
+            gcs_for_uav = gcs
+        ok = uav.connect_to_gcs(gcs_for_uav)
         if not ok:
-            print(f"Authentication failed for {uav.id}")
+            parent = _uav_parent(graph, uav.id) if graph is not None else gcs_for_uav.id
+            print(f"Authentication failed for {uav.id} (GCS={parent}) -> SAFE MODE")
         elif verbose_ids is not None and uav.id in verbose_ids:
             print("Session key established\n")
     end = time.perf_counter()
@@ -116,10 +124,16 @@ def main() -> None:
     params = generate_parameters(n=256, q=4093)
     print(f"RLWE parameters: n={params['n']}, q={params['q']}\n")
 
-    gcs = GroundControlStation(gcs_id="GCS1")
+    gcs1 = GroundControlStation(gcs_id="GCS1")
+    # This can represent a legitimate neighboring GCS OR a rogue base station.
+    # By default, UAVs will NOT trust GCS2 unless explicitly provisioned.
+    gcs2 = GroundControlStation(gcs_id="GCS2")
     uavs = create_swarm(swarm_size)
     for uav in uavs:
-        gcs.register_uav(uav.id)
+        gcs1.register_uav(uav.id)
+        gcs2.register_uav(uav.id)
+        # Trust policy: only GCS1 is trusted by default.
+        uav.trust_gcs(gcs1.id, gcs1.auth_token)
 
     uav_ids = [u.id for u in uavs]
     graph = build_swarm_graph(uav_ids)
@@ -130,7 +144,8 @@ def main() -> None:
     # Round 0: initial batch auth. Print main.py-like logs for the first few UAVs.
     print("\nRound 0: Initial batch authentication\n")
     verbose_first = [u.id for u in uavs[:5]]
-    metrics = run_batch_auth(uavs, gcs, graph=graph, verbose_ids=verbose_first)
+    gcs_map = {"GCS1": gcs1, "GCS2": gcs2}
+    metrics = run_batch_auth(uavs, gcs1, graph=graph, verbose_ids=verbose_first, gcs_map=gcs_map)
     _print_session_keys(uavs, header="--- Session keys (hex) ---", limit=5)
 
     ax_graph.clear()
@@ -170,7 +185,7 @@ def main() -> None:
 
         # Re-auth after topology change. Print detailed logs only for moved UAVs.
         print("Re-running RLWE key agreement\n")
-        metrics = run_batch_auth(uavs, gcs, graph=graph, verbose_ids=to_move)
+        metrics = run_batch_auth(uavs, gcs1, graph=graph, verbose_ids=to_move, gcs_map=gcs_map)
         _print_session_keys(uavs, header="--- Session keys after topology change (hex) ---", limit=5)
 
         ax_graph.clear()

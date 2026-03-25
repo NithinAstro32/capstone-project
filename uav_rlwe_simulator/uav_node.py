@@ -2,7 +2,7 @@
 UAV (Unmanned Aerial Vehicle) node for the simulated network.
 """
 
-from typing import Optional, Any
+from typing import Optional, Any, Dict
 
 
 class UAVNode:
@@ -13,6 +13,11 @@ class UAVNode:
         self.session_key: Optional[bytes] = None
         self.connected_gcs: Optional[Any] = None
         self._domain: Optional[str] = None
+        # Trust policy / allowlist: which GCS IDs this UAV is allowed to accept.
+        # Stores toy pre-shared tokens for each trusted GCS.
+        self.trusted_gcs_tokens: Dict[str, bytes] = {}
+        # Fail-closed behavior when encountering unknown/rogue GCS.
+        self.safe_mode: bool = False
 
     def connect_to_gcs(self, gcs: Any) -> bool:
         self.connected_gcs = gcs
@@ -23,9 +28,20 @@ class UAVNode:
             return False
         from key_agreement import rlwe_handshake
 
-        self.session_key = rlwe_handshake(self, self.connected_gcs)
+        session_key = rlwe_handshake(self, self.connected_gcs)
+        if not session_key:
+            # Unknown/rogue GCS or failed verification: fail closed.
+            self.session_key = None
+            self.safe_mode = True
+            return False
+        self.safe_mode = False
+        self.session_key = session_key
         self.connected_gcs.store_session_key(self.id, self.session_key)
         return True
+
+    def trust_gcs(self, gcs_id: str, token: bytes) -> None:
+        """Allow this UAV to authenticate with a specific GCS by storing its token."""
+        self.trusted_gcs_tokens[gcs_id] = token
 
     def update_session_key(self, new_key: bytes) -> None:
         self.session_key = new_key

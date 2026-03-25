@@ -3,18 +3,35 @@ Ground Control Station (GCS) that manages UAV nodes and RLWE key agreement.
 """
 
 from typing import Dict, List, Optional, Any
+import hashlib
+import secrets
 
 
 class GroundControlStation:
     """GCS that registers UAVs, authenticates them, and stores session keys."""
 
-    def __init__(self, gcs_id: str = "GCS"):
+    def __init__(self, gcs_id: str = "GCS", auth_token: Optional[bytes] = None):
         self.id = gcs_id
         self.registered_uavs: List[str] = []
         self.active_sessions: Dict[str, bytes] = {}
         self._keypair: Optional[tuple] = None
         self._rlwe_secret: Optional[Any] = None
         self._rlwe_params: Optional[Dict[str, Any]] = None
+        # Pre-shared token used to prove GCS identity (toy model).
+        # In a real system this would be replaced by PQ signatures/certificates.
+        self.auth_token: bytes = auth_token if auth_token is not None else secrets.token_bytes(32)
+
+    def prove_identity(self, nonce: bytes) -> bytes:
+        """
+        Toy identity proof (challenge-response).
+
+        Args:
+            nonce: Random challenge sent by UAV.
+
+        Returns:
+            digest = SHA256(auth_token || nonce)
+        """
+        return hashlib.sha256(self.auth_token + nonce).digest()
 
     def register_uav(self, uav_id: str) -> None:
         if uav_id not in self.registered_uavs:
